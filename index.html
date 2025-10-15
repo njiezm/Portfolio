@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Étudiant | Système Central de Projets</title>
+    <!-- Chargement de Tailwind CSS pour un style moderne et responsive -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700;800&display=swap');
+        :root {
+            --color-bg-dark: #1e1e2e;
+            --color-bg-window: #282a36;
+            --color-text: #f8f8f2;
+            --color-accent: #8be9fd;
+            --color-red: #ff5555;
+            --color-yellow: #f1fa8c;
+            --color-green: #50fa7b;
+            --color-folder: #bd93f9;
+            --color-file: #f8f8f2;
+            --color-video: #ff79c6;
+            --color-pdf: #ff5555;
+        }
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: var(--color-bg-dark);
+            color: var(--color-text);
+            padding: 0.5rem;
+            min-height: 100vh;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+        }
+        /* MAIN-WINDOW: Définit la hauteur fixe et la structure Flex (colonne) */
+        #main-window {
+            margin-top: 1rem;
+            height: 600px; /* Hauteur fixe demandée */
+            display: flex; /* Active Flexbox */
+            flex-direction: column; /* Empile les éléments verticalement */
+            overflow: hidden; /* Empêche la fenêtre principale de défiler, le flex-1/overflow-y-auto le gère à l'intérieur */
+        }
+
+        .window-header {
+            background-color: #44475a;
+            border-bottom: 2px solid var(--color-accent);
+            flex-shrink: 0; /* Assure que le header ne rétrécit pas */
+        }
+        /* Style pour les items de la liste */
+        .file-item {
+            cursor: pointer;
+            transition: all 0.1s;
+        }
+        .file-item:hover {
+            background-color: rgba(139, 233, 253, 0.1);
+        }
+        .nav-link {
+            cursor: pointer;
+            transition: all 0.1s;
+            color: var(--color-text);
+        }
+        .nav-link:hover {
+             color: var(--color-accent);
+        }
+        
+        /* Suppression des classes de max-height/overflow de la liste de projets.
+           Le conteneur parent (le div flex-1) gère désormais le défilement. */
+
+        .folder-icon { color: var(--color-folder); }
+        .file-icon { color: var(--color-file); }
+        .video-icon { color: var(--color-video); }
+        .pdf-icon { color: var(--color-pdf); }
+        
+        /* TERMINAL OUTPUT: Assuré que la console a une hauteur fixe à l'intérieur de son conteneur */
+        .terminal-output {
+            background-color: #21222c;
+            min-height: 10rem;
+            max-height: 10rem;
+            overflow-y: auto;
+            border-top: 1px solid var(--color-accent);
+        }
+
+        /* --- FENÊTRE DYNAMIQUE (Aperçu) --- */
+        #dynamic-window {
+    position: fixed;
+    z-index: 1000;
+    width: 60vw;              /* largeur plus raisonnable */
+    height: 70vh;             /* hauteur adaptée */
+    min-width: 400px;         /* taille minimale */
+    max-width: 90vw;          /* empêche de dépasser l’écran */
+    max-height: 90vh;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    transition: width 0.3s, height 0.3s, transform 0.3s, top 0.3s, left 0.3s;
+    cursor: default;
+}
+
+        #dynamic-window.maximized {
+            width: 100vw !important;
+            height: 80vh !important;
+            top: 0 !important;
+            left: 0 !important;
+            transform: none !important;
+            border-radius: 0;
+        }
+        #window-header-drag {
+            cursor: grab;
+            user-select: none;
+        }
+        @media (max-width: 767px) {
+            .resize-handle { display: none; }
+            #window-header-drag { cursor: default; }
+            /* Cacher la colonne Chemin sur les très petits écrans */
+            .path-col { display: none; }
+        }
+        .resize-handle { position: absolute; width: 10px; height: 10px; background: transparent; z-index: 10; }
+        .handle-n { top: -5px; left: 0; width: 100%; cursor: n-resize; }
+        .handle-s { bottom: -5px; left: 0; width: 100%; cursor: s-resize; }
+        .handle-e { top: 0; right: -5px; height: 100%; cursor: e-resize; }
+        .handle-w { top: 0; left: -5px; height: 100%; cursor: w-resize; }
+        .handle-ne { top: -5px; right: -5px; cursor: ne-resize; }
+        .handle-nw { top: -5px; left: -5px; cursor: nw-resize; }
+        .handle-se { bottom: -5px; right: -5px; cursor: se-resize; }
+        .handle-sw { bottom: -5px; left: -5px; cursor: sw-resize; }
+        #project-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background-color: var(--color-text);
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { 'accent': 'var(--color-accent)' }
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <!-- Conteneur de la Fenêtre Principale (FIXE H:700px, W:max-w-4xl, FLEX COLONNE) -->
+    <div id="main-window" class="w-full max-w-4xl bg-[var(--color-bg-window)] shadow-2xl rounded-lg border-2 border-accent transition-all duration-300 flex flex-col h-[700px] overflow-hidden">
+
+        <!-- Barre de Titre (FIXE TOP) -->
+        <div class="window-header flex-shrink-0 flex items-center justify-between p-2">
+            <div class="flex space-x-2">
+                <div class="h-3 w-3 rounded-full" style="background-color: var(--color-red);" title="Fermer"></div>
+                <div class="h-3 w-3 rounded-full" style="background-color: var(--color-yellow);" title="Minimiser"></div>
+                <div class="h-3 w-3 rounded-full" style="background-color: var(--color-green);" title="Maximiser"></div>
+            </div>
+            <span id="path-breadcrumb" class="text-sm font-bold uppercase text-accent truncate">~ /</span>
+            <div></div>
+        </div>
+
+        <!-- Corps de la Fenêtre (SCROLLABLE AREA) -->
+        <div class="flex-1 overflow-y-auto p-4">
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                <!-- Colonne 1: Arborescence (NAVIGATION) -->
+                <div class="hidden md:block md:col-span-1 border-r border-gray-700 md:pr-4">
+                    <h2 class="text-lg font-bold mb-3 text-accent border-b border-gray-700 pb-1">Système de Fichiers</h2>
+                    <div class="space-y-1 text-sm" id="project-tree-container">
+                        <!-- Arborescence statique (vos points de navigation) -->
+                        <div class="flex items-center nav-link" onclick="handleNavigation('/')">
+                            <span class="folder-icon mr-2">🗄️</span> Root (/)
+                        </div>
+                        <div class="ml-4 space-y-1">
+                            <div class="flex items-center nav-link" onclick="handleNavigation('/dev/')">
+                                <span class="folder-icon mr-2">📂</span> dev
+                            </div>
+                            <div class="flex items-center nav-link" onclick="handleNavigation('/media/')">
+                                <span class="folder-icon mr-2">📂</span> media
+                            </div>
+                            <div class="flex items-center nav-link" onclick="handleNavigation('/doc/')">
+                                <span class="folder-icon mr-2">📂</span> doc
+                            </div>
+                            <!-- Ajoutez d'autres chemins si nécessaire -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Colonne 2 & 3: Liste des Projets/Dossiers (Vue actuelle) -->
+                <div class="md:col-span-2">
+                    <h2 class="text-lg font-bold mb-3 text-accent border-b border-gray-700 pb-1">Contenu de <span id="current-folder-title">/</span> (ls -l)</h2>
+
+                    <!-- En-tête de la liste -->
+                    <div class="flex text-xs uppercase text-gray-500 mb-2 border-b border-gray-700 pb-1">
+                        <span class="w-1/2 sm:w-2/5">Nom</span>
+                        <span class="w-1/5 text-center hidden sm:block">Type</span>
+                        <span class="w-1/2 sm:w-2/5 path-col">Chemin</span>
+                    </div>
+
+                    <!-- Liste des Projets (Le scroll est géré par le parent 'flex-1 overflow-y-auto') -->
+                    <div id="project-list" class="space-y-1">
+                        <!-- Les éléments de projet seront insérés ici par JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Console de Sortie (FIXE BOTTOM) -->
+        <div class="p-4 flex-shrink-0 border-t border-gray-700">
+            <div class="terminal-output p-3 rounded-md">
+                <p class="text-sm text-accent"><span class="text-green-400 font-bold">user@host</span>:<span class="text-blue-400">~<span id="current-dir-display">/</span></span>$ <span id="current-command">echo 'Système prêt...'</span></p>
+                <div id="output-log" class="text-sm">
+                    <!-- Les messages de la console apparaîtront ici -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- -------------------------------------------------------------------------------------------------- -->
+    <!-- FENÊTRE DYNAMIQUE (Aperçu) -->
+    <!-- -------------------------------------------------------------------------------------------------- -->
+    <div id="dynamic-window" class="hidden bg-[var(--color-bg-window)] rounded-lg border-2 border-accent overflow-hidden" style="width: 700px; height: 600px;">
+        <!-- Poignées de redimensionnement -->
+        <div class="resize-handle handle-n"></div>
+        <div class="resize-handle handle-s"></div>
+        <div class="resize-handle handle-e"></div>
+        <div class="resize-handle handle-w"></div>
+        <div class="resize-handle handle-ne"></div>
+        <div class="resize-handle handle-nw"></div>
+        <div class="resize-handle handle-se"></div>
+        <div class="resize-handle handle-sw"></div>
+        
+        <!-- Barre de Titre (DRAG HANDLE) -->
+        <div id="window-header-drag" class="window-header flex items-center justify-between p-2">
+            <div class="flex space-x-2">
+                <button onclick="windowControls('close')" class="h-3 w-3 rounded-full" style="background-color: var(--color-red);" title="Fermer"></button>
+                <button onclick="windowControls('maximize')" id="btn-maximize" class="h-3 w-3 rounded-full" style="background-color: var(--color-green);" title="Maximiser"></button>
+            </div>
+            <span id="window-title" class="text-sm font-bold uppercase text-accent truncate">~ / Browser</span>
+            <div class="flex space-x-2">
+                <div class="h-3 w-3"></div>
+                <div class="h-3 w-3"></div>
+                <div class="h-3 w-3"></div>
+            </div>
+        </div>
+
+        <!-- Contenu de la Fenêtre (Iframe) -->
+        <div class="flex-grow h-full p-2">
+            <!-- Ajouter allow="fullscreen" pour les vidéos -->
+            <iframe id="project-iframe" src="about:blank" allow="fullscreen"></iframe>
+        </div>
+    </div>
+
+    <script>
+        // --- DATA STRUCTURE (Projets) ---
+        // 'type' détermine l'icône et l'action: Folder, Web, PDF, Video, Other
+        const projects = [
+            // Dossiers principaux
+            { name: "dev", type: "Folder", path: "/dev/", parentPath: "/" },
+            { name: "media", type: "Folder", path: "/media/", parentPath: "/" },
+            { name: "doc", type: "Folder", path: "/doc/", parentPath: "/" },
+
+            // Contenu de /dev/
+            { name: "portfolio", type: "Folder", path: "/dev/portfolio/", parentPath: "/dev/" },
+            { name: "backend", type: "Folder", path: "/dev/backend/", parentPath: "/dev/" },
+            
+            // Contenu de /doc/
+            { name: "pdfs", type: "Folder", path: "/doc/pdfs/", parentPath: "/doc/" },
+            
+            // Contenu de /media/
+            { name: "videos", type: "Folder", path: "/media/videos/", parentPath: "/media/" },
+            
+            // Contenu de /doc/pdfs/
+            { name: "Documentation Technique", type: "PDF", path: "/doc/pdfs/documentation-technique.pdf", parentPath: "/doc/pdfs/", url: "https://placehold.co/800x600/ff5555/ffffff?text=Documentation%20Technique%20(PDF%20Simule)" },
+            { name: "MISE EN PLACE D'UN ENVIRONNEMENT DE DEV", type: "PDF", path: "/doc/pdfs/env-dev.pdf", parentPath: "/doc/pdfs/", url: "https://placehold.co/800x600/ff5555/ffffff?text=Mise%20en%20Place%20Environnement%20Dev%20(PDF%20Simule)" },
+
+            // Contenu de /media/videos/
+            { name: "interview ben behesty", type: "Video", path: "/media/videos/interview-ben-behesty.mp4", parentPath: "/media/videos/", url: "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1" },
+            
+            // Contenu de /dev/portfolio/
+            { name: "apps", type: "Folder", path: "/dev/portfolio/apps/", parentPath: "/dev/portfolio/" },
+            { name: "games", type: "Folder", path: "/dev/portfolio/games/", parentPath: "/dev/portfolio/" },
+            { name: "misc", type: "Folder", path: "/dev/portfolio/misc/", parentPath: "/dev/portfolio/" },
+            { name: "Blablaboat", type: "Web", path: "/dev/portfolio/blablaboat/", parentPath: "/dev/portfolio/", url: "https://placehold.co/800x600/10b981/ffffff?text=Blablaboat" },
+            { name: "Carto_Rezo", type: "Web", path: "/dev/portfolio/carto-rezo/", parentPath: "/dev/portfolio/", url: "https://placehold.co/800x600/f59e0b/ffffff?text=Carto_Rezo" },
+            { name: "MG_Planner", type: "Web", path: "/dev/portfolio/mg-planner/", parentPath: "/dev/portfolio/", url: "https://njiezamon.alwaysdata.net/mgexp/" },
+            { name: "Praestus", type: "Web", path: "/dev/portfolio/praestus/", parentPath: "/dev/portfolio/", url: "https://placehold.co/800x600/6366f1/ffffff?text=Praestus" },
+            { name: "Rezo_Filibo", type: "Web", path: "/dev/portfolio/rezo-filibo/", parentPath: "/dev/portfolio/", url: "https://placehold.co/800x600/ec4899/ffffff?text=Rezo_Filibo" },
+            { name: "SITE BUT INFO MARTINIQUE", type: "Web", path: "/dev/portfolio/but-info-mq/", parentPath: "/dev/portfolio/", url: "https://placehold.co/800x600/06b6d4/ffffff?text=Site%20BUT%20Info%20Martinique" },
+            { name: "Ma caisse enregistreurse", type: "Web", path: "/dev/portfolio/caisse-enregistreuse/", parentPath: "/dev/portfolio/", url: "https://placehold.co/800x600/22c55e/ffffff?text=Ma%20Caisse%20Enregistreuse" },
+
+            // Contenu de /dev/portfolio/apps/
+            { name: "Christmas Calendar", type: "Web", path: "/dev/portfolio/apps/calendar/", parentPath: "/dev/portfolio/apps/" },
+            { name: "FamilyHub", type: "Web", path: "/dev/portfolio/apps/familyhub/", parentPath: "/dev/portfolio/apps/", url: "https://placehold.co/800x600/9333ea/ffffff?text=FamilyHub" },
+            { name: "Netflix & Chill", type: "Web", path: "/dev/portfolio/apps/netflix-chill/", parentPath: "/dev/portfolio/apps/", url: "https://placehold.co/800x600/e11d48/ffffff?text=Netflix%20%26%20Chill" },
+
+            // Contenu de /dev/portfolio/games/
+            { name: "Pere noel Game", type: "Web", path: "/dev/portfolio/games/pere-noel/", parentPath: "/dev/portfolio/games/", url: "./pere_noel" },
+            { name: "Horrow Game", type: "Web", path: "/dev/portfolio/games/horror-game/", parentPath: "/dev/portfolio/games/", url: "https://placehold.co/800x600/4f0000/ffffff?text=Horror%20Game" },
+
+            // Contenu de /dev/portfolio/misc/
+            { name: "Mon amour", type: "Web", path: "/dev/portfolio/misc/mon-amour/", parentPath: "/dev/portfolio/misc/", url: "https://placehold.co/800x600/f97316/ffffff?text=Mon%20Amour%20App" },
+            { name: "My TV", type: "Web", path: "/dev/portfolio/misc/my-tv/", parentPath: "/dev/portfolio/misc/", url: "https://placehold.co/800x600/a3e635/1e1e2e?text=My%20TV%20Project" },
+        ];
+
+        // --- GLOBAL STATE ---
+        let currentPath = '/';
+        
+        // --- DOM ELEMENTS ---
+        const projectListContainer = document.getElementById('project-list');
+        const outputLogContainer = document.getElementById('output-log');
+        const currentCommand = document.getElementById('current-command');
+        const currentDirDisplay = document.getElementById('current-dir-display');
+        const pathBreadcrumb = document.getElementById('path-breadcrumb');
+        const currentFolderTitle = document.getElementById('current-folder-title');
+        
+        const dynamicWindow = document.getElementById('dynamic-window');
+        const windowHeader = document.getElementById('window-header-drag');
+        const windowTitle = document.getElementById('window-title');
+        const projectIframe = document.getElementById('project-iframe');
+
+        let isDragging = false;
+        let isResizing = false;
+        let dragOffsetX, dragOffsetY;
+        let resizeDirection = null;
+
+        let originalBounds = { width: 700, height: 600, top: 0, left: 0 }; 
+        const HEADER_HEIGHT = 44;
+        const isMobile = () => window.innerWidth < 768;
+
+        // --- CORE LOGIC ---
+
+        function log(message, type = 'info') {
+            const p = document.createElement('p');
+            p.className = 'text-xs mt-1';
+            let color = 'text-gray-400';
+            if (type === 'web') color = 'text-green-400';
+            if (type === 'error') color = 'text-red-400';
+            p.innerHTML = `<span class="${color}">[${new Date().toLocaleTimeString('fr-FR')}] ${message}</span>`;
+            outputLogContainer.appendChild(p);
+            outputLogContainer.scrollTop = outputLogContainer.scrollHeight;
+        }
+        
+        // Gère la navigation (changement de répertoire)
+        function handleNavigation(newPath) {
+            
+            if (newPath === '..') {
+                if (currentPath === '/') return;
+                const pathSegments = currentPath.split('/').filter(s => s);
+                pathSegments.pop();
+                currentPath = '/' + pathSegments.join('/') + (pathSegments.length > 0 ? '/' : '');
+            } else {
+                currentPath = newPath;
+            }
+            
+            // MAJ: Persistance du chemin dans l'URL (hash)
+            const pathForHash = currentPath === '/' ? '' : currentPath.slice(1, -1);
+            window.location.hash = pathForHash;
+
+
+            // Mettre à jour l'affichage
+            currentDirDisplay.textContent = currentPath === '/' ? '/' : currentPath;
+            pathBreadcrumb.textContent = '~' + currentPath;
+            currentFolderTitle.textContent = currentPath;
+            currentCommand.textContent = `cd ${currentPath}`;
+            log(`Changement de répertoire vers: ${currentPath}`);
+            renderProjectList();
+        }
+
+        // Lance l'application/le contenu dans la fenêtre dynamique
+        function handleProjectLaunch(project) {
+            currentCommand.textContent = `open ${project.name}`;
+
+            if (!project.url) {
+                log(`Erreur: Aucun lien de destination trouvé pour ${project.name}.`, 'error');
+                return;
+            }
+
+            log(`Lancement de l'artifact : ${project.name} (${project.type})...`, 'web');
+
+            windowTitle.textContent = `${project.name} - Aperçu`;
+            
+            projectIframe.src = project.url;
+            
+            // MAJ: Ajout de 'encrypted-media' pour corriger certains problèmes de lecture vidéo
+            if (project.type === 'Video') {
+                projectIframe.setAttribute('allow', 'autoplay; fullscreen; encrypted-media');
+            } else {
+                projectIframe.setAttribute('allow', 'fullscreen');
+            }
+
+            dynamicWindow.classList.remove('hidden');
+
+            // Positionnement adaptatif
+            if (isMobile()) {
+                windowControls('maximize');
+            } else {
+                windowControls('restore'); // Ensure it's not maximized on launch
+            }
+        }
+
+        // Action universelle au clic sur un élément de la liste
+        function handleItemClick(item) {
+            if (item.type === 'Folder') {
+                handleNavigation(item.path);
+            } else {
+                handleProjectLaunch(item);
+            }
+        }
+
+
+        // Affiche la liste des projets dans le répertoire actuel
+        function renderProjectList() {
+            projectListContainer.innerHTML = '';
+            
+            // 1. Ajouter l'élément "Remonter" si ce n'est pas la racine
+            if (currentPath !== '/') {
+                const upItem = document.createElement('div');
+                upItem.className = 'file-item nav-link flex items-center p-2 rounded-md transition-colors duration-100 font-bold';
+                upItem.onclick = () => handleNavigation('..'); // SIMPLE CLICK for navigation
+                upItem.innerHTML = `
+                    <span class="w-1/2 sm:w-2/5 flex items-center text-yellow-400">
+                        <span class="mr-2">⬆️</span> .. (Remonter)
+                    </span>
+                    <span class="w-1/5 text-center hidden sm:block text-gray-400">Dossier</span>
+                    <span class="w-1/2 text-xs text-gray-500 truncate sm:w-2/5 path-col">${currentPath}</span>
+                `;
+                projectListContainer.appendChild(upItem);
+            }
+
+            // 2. Filtrer les éléments qui appartiennent à ce répertoire
+            const currentItems = projects.filter(p => p.parentPath === currentPath);
+
+            // 3. Trier les dossiers avant les fichiers/liens
+            currentItems.sort((a, b) => {
+                if (a.type === 'Folder' && b.type !== 'Folder') return -1;
+                if (a.type !== 'Folder' && b.type === 'Folder') return 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            // 4. Afficher les éléments
+            currentItems.forEach(item => {
+                const listName = item.name;
+                const pathDisplay = item.path;
+                let icon = '📄';
+                let iconColor = 'var(--color-file)';
+                let typeLabel = item.type;
+                let itemClass = 'file-item';
+
+                if (item.type === "Folder") {
+                    icon = '📂';
+                    iconColor = 'var(--color-folder)';
+                    typeLabel = 'Dossier';
+                } else if (item.type === "Video") {
+                    icon = '🎬';
+                    iconColor = 'var(--color-video)';
+                    typeLabel = 'Vidéo';
+                } else if (item.type === "PDF") {
+                    icon = '📕';
+                    iconColor = 'var(--color-pdf)';
+                    typeLabel = 'Document';
+                } else if (item.type === "Web") {
+                    icon = '🌐';
+                    iconColor = 'var(--color-accent)';
+                    typeLabel = 'Web App';
+                }
+
+                const listItem = document.createElement('div');
+                listItem.className = `${itemClass} flex items-center p-2 rounded-md transition-colors duration-100`;
+                listItem.onclick = () => handleItemClick(item); // SIMPLE CLICK UNIVERSAL
+
+                listItem.innerHTML = `
+                    <span class="w-1/2 sm:w-2/5 flex items-center">
+                        <span style="color: ${iconColor};" class="mr-2">${icon}</span> 
+                        <span class="truncate">${listName}</span>
+                    </span>
+                    <span class="w-1/5 text-center hidden sm:block text-gray-400">${typeLabel}</span>
+                    <span class="w-1/2 text-xs text-gray-500 truncate sm:w-2/5 path-col">${pathDisplay}</span>
+                `;
+                projectListContainer.appendChild(listItem);
+            });
+        }
+
+
+        // --- FENÊTRE DYNAMIQUE CONTROLS ---
+
+        function windowControls(action) {
+            currentCommand.textContent = `window.${action}()`;
+            
+            if (action === 'close') {
+                dynamicWindow.classList.add('hidden');
+                projectIframe.src = 'about:blank';
+                dynamicWindow.classList.remove('maximized');
+            } else if (action === 'maximize') {
+                if (dynamicWindow.classList.contains('maximized')) {
+                    dynamicWindow.style.width = originalBounds.width + 'px';
+                    dynamicWindow.style.height = originalBounds.height + 'px';
+                    dynamicWindow.style.top = originalBounds.top + 'px';
+                    dynamicWindow.style.left = originalBounds.left + 'px';
+                    dynamicWindow.classList.remove('maximized');
+                    if (!isMobile()) { windowHeader.style.cursor = 'grab'; }
+                } else {
+                    originalBounds.width = dynamicWindow.offsetWidth;
+                    originalBounds.height = dynamicWindow.offsetHeight;
+                    originalBounds.top = dynamicWindow.offsetTop;
+                    originalBounds.left = dynamicWindow.offsetLeft;
+                    
+                    dynamicWindow.classList.add('maximized');
+                    dynamicWindow.style.removeProperty('width');
+                    dynamicWindow.style.removeProperty('height');
+                    dynamicWindow.style.top = '0px';
+                    dynamicWindow.style.left = '0px';
+                    windowHeader.style.cursor = 'default';
+                }
+            } else if (action === 'restore') {
+                if (dynamicWindow.classList.contains('maximized')) {
+                    windowControls('maximize'); // Maximized -> restore (un-maximize)
+                } else {
+                    // Not maximized, ensure default positioning
+                    const viewportHeight = window.innerHeight;
+                    const viewportWidth = window.innerWidth;
+                    
+                    const windowHeight = originalBounds.height || 600;
+                    const windowWidth = originalBounds.width || 700;
+
+                    let newTop = (viewportHeight - windowHeight) / 2;
+                    let newLeft = (viewportWidth - windowWidth) / 2;
+                    
+                    dynamicWindow.style.left = `${newLeft}px`;
+                    dynamicWindow.style.top = `${newTop}px`;
+                    dynamicWindow.style.width = `${windowWidth}px`;
+                    dynamicWindow.style.height = `${windowHeight}px`;
+
+                    originalBounds = { 
+                        width: windowWidth, 
+                        height: windowHeight, 
+                        top: newTop, 
+                        left: newLeft 
+                    };
+                    projectIframe.style.height = (windowHeight - HEADER_HEIGHT) + 'px';
+                }
+            }
+        }
+
+        // --- DRAG/RESIZE LOGIC ---
+
+        windowHeader.addEventListener('mousedown', (e) => {
+            if (dynamicWindow.classList.contains('maximized') || isMobile()) return;
+            isDragging = true;
+            dragOffsetX = e.clientX - dynamicWindow.offsetLeft;
+            dragOffsetY = e.clientY - dynamicWindow.offsetTop;
+            dynamicWindow.style.transition = 'none';
+            windowHeader.style.cursor = 'grabbing';
+        });
+
+        document.querySelectorAll('.resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                if (dynamicWindow.classList.contains('maximized') || isMobile()) return;
+                isResizing = true;
+                resizeDirection = handle.classList[1].substring(6);
+                dynamicWindow.style.transition = 'none';
+                e.stopPropagation();
+            });
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                let newLeft = e.clientX - dragOffsetX;
+                let newTop = e.clientY - dragOffsetY;
+                newTop = Math.max(0, newTop); 
+                dynamicWindow.style.left = newLeft + 'px';
+                dynamicWindow.style.top = newTop + 'px';
+            }
+            else if (isResizing) {
+                const minWidth = 300;
+                const minHeight = 200;
+                let newWidth = dynamicWindow.offsetWidth;
+                let newHeight = dynamicWindow.offsetHeight;
+                let newLeft = dynamicWindow.offsetLeft;
+                let newTop = dynamicWindow.offsetTop;
+                
+                // Simplified resize application
+                if (resizeDirection.includes('n')) { newHeight = Math.max(minHeight, newHeight - (e.clientY - dynamicWindow.offsetTop)); newTop = e.clientY; }
+                if (resizeDirection.includes('s')) { newHeight = Math.max(minHeight, e.clientY - dynamicWindow.offsetTop); }
+                if (resizeDirection.includes('w')) { newWidth = Math.max(minWidth, newWidth - (e.clientX - dynamicWindow.offsetLeft)); newLeft = e.clientX; }
+                if (resizeDirection.includes('e')) { newWidth = Math.max(minWidth, e.clientX - dynamicWindow.offsetLeft); }
+
+                // Check bounds and apply
+                if (newWidth >= minWidth) { dynamicWindow.style.width = newWidth + 'px'; }
+                if (newHeight >= minHeight) { dynamicWindow.style.height = newHeight + 'px'; }
+
+                // Recalculate Top/Left carefully (only for N/W resizes)
+                if (resizeDirection.includes('n') && newHeight >= minHeight) {
+                    newTop = Math.min(newTop, window.innerHeight - newHeight);
+                    newTop = Math.max(0, newTop);
+                    dynamicWindow.style.top = newTop + 'px';
+                }
+                if (resizeDirection.includes('w') && newWidth >= minWidth) {
+                    newLeft = Math.min(newLeft, window.innerWidth - newWidth);
+                    dynamicWindow.style.left = newLeft + 'px';
+                }
+
+                projectIframe.style.height = (dynamicWindow.offsetHeight - HEADER_HEIGHT) + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging || isResizing) {
+                isDragging = false;
+                isResizing = false;
+                resizeDirection = null;
+                dynamicWindow.style.transition = 'all 0.1s ease-out';
+                if (!isMobile()) { windowHeader.style.cursor = 'grab'; }
+
+                originalBounds = { 
+                    width: dynamicWindow.offsetWidth, 
+                    height: dynamicWindow.offsetHeight, 
+                    top: dynamicWindow.offsetTop, 
+                    left: dynamicWindow.offsetLeft 
+                };
+            }
+        });
+
+
+        // --- INITIALIZATION ---
+        window.onload = function() {
+            // Lecture du hash pour la persistance du chemin
+            let initialPath = '/';
+            if (window.location.hash) {
+                let pathFromHash = window.location.hash.substring(1);
+                if (pathFromHash) {
+                    // S'assurer qu'il commence et se termine par un slash si non vide
+                    if (!pathFromHash.startsWith('/')) pathFromHash = '/' + pathFromHash;
+                    if (!pathFromHash.endsWith('/')) pathFromHash += '/';
+                    initialPath = pathFromHash;
+                }
+            }
+
+            log('Système de Projets v5.2 (Bash Fixe) initialisé.', 'web');
+            log(`Le chemin initial chargé est: ${initialPath}`);
+            handleNavigation(initialPath); // Commencer au chemin sauvegardé
+            windowControls('restore'); // Centrer la fenêtre d'aperçu
+        }
+    </script>
+
+</body>
+</html>
